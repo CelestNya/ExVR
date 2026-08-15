@@ -128,7 +128,9 @@ def apply_smoothing():
     """
 
     last_time = time.perf_counter()
-    frame_duration = 1.0 / 1000.0  # 1 kHz worker loop
+    # 平滑循环频率 120Hz（原 1kHz 纯浪费 CPU：数据源帧率远低于 1000fps）。
+    # dt 按 (120/1000) 归一化，保证与旧 1kHz 实现相同的平滑强度。
+    frame_duration = 1.0 / 120.0
 
     while not g.stop_event.is_set() and g.config["Smoothing"]["enable"]:
         now = time.perf_counter()
@@ -152,7 +154,7 @@ def apply_smoothing():
             shifting = params.get("shifting", 0)
             is_rotation = params.get("is_rotation", False)
             dt_mul = params.get("dt_multiplier", 20)
-            dt = dt_base * dt_mul
+            dt = dt_base * dt_mul * (120.0 / 1000.0)
 
             # Gather the observation vector for this action
             try:
@@ -191,7 +193,7 @@ def apply_smoothing():
             shifting = other_cfg.get("shifting", 0)
             is_rotation = other_cfg.get("is_rotation", False)
             dt_mul = other_cfg.get("dt_multiplier", 20)
-            dt = dt_base * dt_mul
+            dt = dt_base * dt_mul * (120.0 / 1000.0)
 
             for idx, raw in enumerate(g.latest_data):
                 if idx in handled_indices:
