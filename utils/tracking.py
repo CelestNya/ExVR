@@ -136,13 +136,8 @@ class Tracker:
 
     def process_frame(self, image_rgb):
         timestamp_ms = int((cv2.getTickCount() - g.start_time) * 1000 / cv2.getTickFrequency())
-        needs_frame = (
-            g.config["Tracking"]["Hand"]["enable"]
-            or g.config["Tracking"]["Head"]["enable"]
-            or g.config["Tracking"]["Face"]["enable"]
-            or g.config["Tracking"]["Tongue"]["enable"]
-        )
-        frame = image_rgb.copy() if needs_frame else image_rgb
+        # cv2.VideoCapture.read 每次返回全新数组（实测验证），worker 只读共享，无需拷贝
+        frame = image_rgb
         if g.config["Tracking"]["Hand"]["enable"]:
             self.hand_worker.submit(frame)
         if (

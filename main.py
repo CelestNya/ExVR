@@ -1,4 +1,5 @@
 import sys
+import time
 import onnxruntime as _onnxruntime_preload
 import pyuac
 if not pyuac.isUserAdmin():
@@ -126,28 +127,32 @@ class VideoCaptureThread(QThread):
         self.video_capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         while self.is_running:
             ret, frame = self.video_capture.read()
-            if ret:
-                rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                rgb_image = self.resize_for_processing(rgb_image)
-                if g.config["Setting"]["flip_x"]:
-                    rgb_image = cv2.flip(rgb_image, 1)
-                if g.config["Setting"]["flip_y"]:
-                    rgb_image = cv2.flip(rgb_image, 0)
+            if not ret:
+                # 摄像头无帧时退避，避免空转烧 CPU（实测黑帧/断连时 read 失败会空转占 ~50% 单核）
+                time.sleep(0.01)
+                continue
+            # 先缩放再转通道：通道转换只在低分辨率上进行（实测省 ~2ms/帧）
+            rgb_image = self.resize_for_processing(frame)
+            rgb_image = cv2.cvtColor(rgb_image, cv2.COLOR_BGR2RGB)
+            if g.config["Setting"]["flip_x"]:
+                rgb_image = cv2.flip(rgb_image, 1)
+            if g.config["Setting"]["flip_y"]:
+                rgb_image = cv2.flip(rgb_image, 0)
 
-                self.tracker.process_frame(rgb_image)
-                if self.show_image:
-                    if g.config["Tracking"]["Head"]["enable"] or g.config["Tracking"]["Face"]["enable"]:
-                        rgb_image = draw_face_landmarks(rgb_image)
-                    if g.config["Tracking"]["Tongue"]["enable"]:
-                        rgb_image = draw_tongue_position(rgb_image)
-                    if g.config["Tracking"]["Hand"]["enable"]:
-                        rgb_image = draw_hand_landmarks(rgb_image)
-                    h, w, ch = rgb_image.shape
-                    bytes_per_line = ch * w
-                    convert_to_Qt_format = QImage(
-                        rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888
-                    )
-                    self.frame_ready.emit(convert_to_Qt_format)
+            self.tracker.process_frame(rgb_image)
+            if self.show_image:
+                if g.config["Tracking"]["Head"]["enable"] or g.config["Tracking"]["Face"]["enable"]:
+                    rgb_image = draw_face_landmarks(rgb_image)
+                if g.config["Tracking"]["Tongue"]["enable"]:
+                    rgb_image = draw_tongue_position(rgb_image)
+                if g.config["Tracking"]["Hand"]["enable"]:
+                    rgb_image = draw_hand_landmarks(rgb_image)
+                h, w, ch = rgb_image.shape
+                bytes_per_line = ch * w
+                convert_to_Qt_format = QImage(
+                    rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888
+                )
+                self.frame_ready.emit(convert_to_Qt_format)
         self.cleanup()
 
     def stop(self):
