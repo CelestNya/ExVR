@@ -1,3 +1,4 @@
+import math
 import time
 import numpy as np
 import utils.data as data_utils
@@ -129,21 +130,18 @@ def apply_smoothing():
 
     last_time = time.perf_counter()
     # 平滑循环频率 120Hz（原 1kHz 纯浪费 CPU：数据源帧率远低于 1000fps）。
-    # dt 按 (120/1000) 归一化，保证与旧 1kHz 实现相同的平滑强度。
-    frame_duration = 1.0 / 120.0
     # 事件驱动：数据源只有 ~30fps，75% 的循环轮次没有新数据。
-    # 跳过时 dt_base 照常累积（last_time 每轮更新），下次处理时一步到位，
-    # 与逐轮处理在数学上等价（KF 的 P += Q*dt 与指数平滑的 dt 累加都是线性的）。
+    # last_time 只在处理轮更新，因此跳过的轮次累积进 dt_base——每个新数据
+    # 帧以真实帧间隔（约 33ms@30fps）做一次平滑，等价于旧 1kHz 实现在该
+    # 间隔内的全部 tick（33 次 × 1ms），平滑强度与旧实现一致。
     last_version = -1
 
     while not g.stop_event.is_set() and g.config["Smoothing"]["enable"]:
         now = time.perf_counter()
-        dt_base = now - last_time  # seconds since previous iteration
 
         if g.latest_data_version != last_version:
-            last_version = g.latest_data_version
-
-        if g.latest_data_version != last_version:
+            dt_base = now - last_time  # real interval since the last processed frame
+            last_time = now
             last_version = g.latest_data_version
 
             # Keep track of which indices have already been handled so that we can
@@ -164,7 +162,14 @@ def apply_smoothing():
                 shifting = params.get("shifting", 0)
                 is_rotation = params.get("is_rotation", False)
                 dt_mul = params.get("dt_multiplier", 20)
-                dt = dt_base * dt_mul * (120.0 / 1000.0)
+                # dt_base is the real interval since the last processed frame.
+                # The old 1kHz loop stepped by (dt_mul * 0.001) per tick, so a
+                # data frame interval dt_base contained dt_base/0.001 ticks and
+                # the total move was 1-(1-dt_mul*0.001)^(dt_base/0.001). Its
+                # continuous equivalent is 1-exp(-dt_mul*dt_base), which stays
+                # in (0,1) and never diverges (a naive dt=dt_mul*dt_base
+                # exceeds 1 and makes the incremental EMA oscillate).
+                dt = 1.0 - math.exp(-dt_mul * dt_base)
 
                 # Gather the observation vector for this action
                 try:
@@ -203,7 +208,7 @@ def apply_smoothing():
                 shifting = other_cfg.get("shifting", 0)
                 is_rotation = other_cfg.get("is_rotation", False)
                 dt_mul = other_cfg.get("dt_multiplier", 20)
-                dt = dt_base * dt_mul * (120.0 / 1000.0)
+                dt = 1.0 - math.exp(-dt_mul * dt_base)
 
                 for idx, raw in enumerate(g.latest_data):
                     if idx in handled_indices:
@@ -220,5 +225,4 @@ def apply_smoothing():
                     update_target_value(target, sm_delta, is_rotation)
 
         # ------------------------------------------------------------------
-        last_time = now
-        time.sleep(frame_duration)
+        time.sleep(1.0 / 120.0)
