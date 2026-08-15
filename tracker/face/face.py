@@ -74,7 +74,17 @@ def is_hand_in_face():
         return normalized_area
     return 0.0
 
+# 舌头模型降频计数：每 2 帧跑一次（15fps 舌头采样，原实现每帧跑 32x32 ONNX + 后处理 ~2ms）
+_tongue_frame_counter = 0
+TONGUE_FRAME_EVERY_N = 2
+
+
 def face_pred_handling(detection_result, output_image, timestamp_ms, tongue_model):
+    global _tongue_frame_counter
+    _tongue_frame_counter += 1
+    run_tongue = g.config["Tracking"]["Tongue"]["enable"] and (
+        _tongue_frame_counter % TONGUE_FRAME_EVERY_N == 0
+    )
     # For each face detected
     for idx in range(len(detection_result.face_landmarks)):
         g.face_landmarks = detection_result.face_landmarks
@@ -106,8 +116,8 @@ def face_pred_handling(detection_result, output_image, timestamp_ms, tongue_mode
         EyePitchLeft = np.clip((g.data["BlendShapes"][11]["v"] - 0.5) + (g.data["BlendShapes"][12]["v"] - 0.5),-1,0.1)
         EyePitchRight=EyePitchLeft
 
-        # Tongue detection
-        if g.config["Tracking"]["Tongue"]["enable"]:
+        # Tongue detection（跳帧轮次跳过，tongue_out 为 None 时写入块自动保持旧值）
+        if run_tongue:
             image_view = output_image if isinstance(output_image, np.ndarray) else output_image.numpy_view()
             mouth_image = mouth_roi_on_image(
                 image_view, detection_result.face_landmarks[0]
@@ -223,6 +233,9 @@ def face_pred_handling(detection_result, output_image, timestamp_ms, tongue_mode
                 g.data["HeadImagePosition"][0]["v"] = head_image_position_x
                 g.data["HeadImagePosition"][1]["v"] = head_image_position_y
                 g.data["HeadImagePosition"][2]["v"] = head_image_position_z
+
+    # 通知平滑循环：本帧数据已写入 latest_data
+    g.latest_data_version += 1
 
 
 

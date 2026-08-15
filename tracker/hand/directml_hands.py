@@ -441,6 +441,9 @@ class DirectMLHands:
         self.min_presence_confidence = min_presence_confidence
         self.prev_rects: list[Rect] = []
         self.detector_refresh_interval = 10
+        # 无手时 palm detector 的降频间隔（原实现无手时每帧跑 detector，
+        # 实测每帧烧 GPU 3.3ms + 排队 1.3ms；手出现后立即恢复每帧跟踪，找回延迟 ~100ms）
+        self.detector_miss_refresh_interval = 3
         self._frames_since_detector = self.detector_refresh_interval
 
     @property
@@ -526,13 +529,16 @@ class DirectMLHands:
             if result is not None:
                 results.append(result)
 
-        needs_detector = not results
+        self._frames_since_detector += 1
         if results:
-            self._frames_since_detector += 1
+            # 有手跟踪中：仅当次手缺失时周期性刷新检测
             needs_detector = (
                 len(results) < self.max_num_hands
                 and self._frames_since_detector >= self.detector_refresh_interval
             )
+        else:
+            # 无手：降频检测，避免每帧空跑 palm detector 烧 GPU/CPU
+            needs_detector = self._frames_since_detector >= self.detector_miss_refresh_interval
 
         if needs_detector:
             detected_rects = self._detect(image_rgb)
