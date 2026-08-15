@@ -1277,6 +1277,16 @@ class VideoWindow(QMainWindow):
         super().closeEvent(event)
 
 if __name__ == "__main__":
+    # 限制进程 CPU 亲和性（config Setting.cpu_affinity，空数组=不限制）。
+    # 示例 [8..15]：把 0-7 号线程留给游戏/VR 进程
+    _affinity = g.config["Setting"].get("cpu_affinity", [])
+    if _affinity:
+        try:
+            import psutil
+            psutil.Process().cpu_affinity([int(x) for x in _affinity])
+            print(f"CPU affinity set to {list(_affinity)}")
+        except Exception as exc:
+            print(f"Failed to set CPU affinity: {exc}")
     app = QApplication(sys.argv)
     install_language(app, g.config["Setting"].get("language", LANGUAGE_SYSTEM))
     window = VideoWindow()

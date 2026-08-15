@@ -182,9 +182,11 @@ class GloveControllerSender:
         return True
 
     def vmt_init(self):
+        # 高度偏移可配置（Controller.height_offset）：站立 ~-0.3，坐姿 ~-0.8，默认 -0.76 保持原行为
+        height_offset = g.config["Controller"].get("height_offset", -0.76)
         self.client.send_message(
             "/VMT/SetRoomMatrix",
-            [1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, -0.76, 0.0, 0.0, 1.0, 1.0],
+            [1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, height_offset, 0.0, 0.0, 1.0, 1.0],
         )
 
     def update_target(self, is_left_hand, target: Transform, use_controller=False, disable_when_down=True):

@@ -12,7 +12,8 @@
         "camera_fps": 60,
         "camera_ip": "",
         "only_ingame": false,
-        "only_ingame_game": ""
+        "only_ingame_game": "",
+        "cpu_affinity": []
     },
     "Hotkey": {
         "enable": true
@@ -39,7 +40,8 @@
         "haptic_max_amplitude": 0.4,
         "haptic_strength": 0.6,
         "pitch_scalar": 2.5,
-        "movement_scalar": 5.0
+        "movement_scalar": 5.0,
+        "height_offset": -0.76
     },
     "Tracking": {
         "LeftController": {
