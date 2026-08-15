@@ -226,14 +226,25 @@ def _splay_from_landmarks(internal, curl):
     return np.asarray(values, dtype=np.float32)
 
 
+# 指尖段改用 MCP→TIP 全指段（原配置的 DIP→TIP/PIP→DIP 段太短，
+# 单目深度噪声下方向摆动大，伸直手指易误判为弯曲）
+_FINGER_FULL_SEGMENT = {
+    "thumb": (2, 4),
+    "index": (5, 8),
+    "middle": (9, 12),
+    "ring": (13, 16),
+    "pinky": (17, 20),
+}
+
+
 def _curl_from_landmarks(hand_pose):
     finger_curl = {}
     for name in FINGER_NAMES:
         cfg = g.config["Tracking"]["Finger"]
         base_start, base_end = cfg[f"{name}_base"]
-        tip_start, tip_end = cfg[f"{name}_tip"]
         min_val = cfg[f"{name}_min"]
         max_val = cfg[f"{name}_max"]
+        tip_start, tip_end = _FINGER_FULL_SEGMENT[name]
         base_vec = hand_pose[base_end] - hand_pose[base_start]
         tip_vec = hand_pose[tip_end] - hand_pose[tip_start]
         if np.linalg.norm(base_vec) < 1e-6 or np.linalg.norm(tip_vec) < 1e-6:
