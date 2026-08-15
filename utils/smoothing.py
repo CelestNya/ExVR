@@ -131,83 +131,93 @@ def apply_smoothing():
     # 平滑循环频率 120Hz（原 1kHz 纯浪费 CPU：数据源帧率远低于 1000fps）。
     # dt 按 (120/1000) 归一化，保证与旧 1kHz 实现相同的平滑强度。
     frame_duration = 1.0 / 120.0
+    # 事件驱动：数据源只有 ~30fps，75% 的循环轮次没有新数据。
+    # 跳过时 dt_base 照常累积（last_time 每轮更新），下次处理时一步到位，
+    # 与逐轮处理在数学上等价（KF 的 P += Q*dt 与指数平滑的 dt 累加都是线性的）。
+    last_version = -1
 
     while not g.stop_event.is_set() and g.config["Smoothing"]["enable"]:
         now = time.perf_counter()
         dt_base = now - last_time  # seconds since previous iteration
 
-        # Keep track of which indices have already been handled so that we can
-        # drop the remainder into OtherBlendShapes afterwards.
-        handled_indices: set[int] = set()
+        if g.latest_data_version != last_version:
+            last_version = g.latest_data_version
 
-        # ------------------------------------------------------------------
-        # Pass 1 – process all *named* actions
-        # ------------------------------------------------------------------
-        for action, params in g.smoothing_config["Parameters"].items():
-            indices = g.indices_map.get(action, [])
-            if not indices:  # skip empty index lists (we'll handle leftovers later)
-                continue
+        if g.latest_data_version != last_version:
+            last_version = g.latest_data_version
 
-            handled_indices.update(indices)
+            # Keep track of which indices have already been handled so that we can
+            # drop the remainder into OtherBlendShapes afterwards.
+            handled_indices: set[int] = set()
 
-            target_key = params["key"]
-            shifting = params.get("shifting", 0)
-            is_rotation = params.get("is_rotation", False)
-            dt_mul = params.get("dt_multiplier", 20)
-            dt = dt_base * dt_mul * (120.0 / 1000.0)
-
-            # Gather the observation vector for this action
-            try:
-                obs_vec = [g.latest_data[idx] for idx in indices]
-            except IndexError:
-                # Source array shorter than expected – just skip this action
-                continue
-
-            # Kalman filter unless this is the catch‑all OtherBlendShapes bucket
-            if action in g.kalman_filters:
-                kf = g.kalman_filters[action]
-                kf.predict(dt_base)
-                filt_vec = kf.update(obs_vec, is_rotation)
-            else:
-                filt_vec = obs_vec  # raw values (no KF)
-
-            # Write the smoothed deltas back to the destination buffer
-            for local_i, idx in enumerate(indices):
-                target_idx = idx - shifting
-                data_array = g.data[target_key]
-                if not (0 <= target_idx < len(data_array)):
-                    continue  # out‑of‑range – ignore gracefully
-
-                target = data_array[target_idx]
-                raw = filt_vec[local_i]
-                delta = angle_diff(raw, target["v"]) if is_rotation else raw - target["v"]
-                sm_delta = delta * dt
-                update_target_value(target, sm_delta, is_rotation)
-
-        # ------------------------------------------------------------------
-        # Pass 2 – fall back to "OtherBlendShapes" for *everything else*
-        # ------------------------------------------------------------------
-        other_cfg = g.smoothing_config["Parameters"].get("OtherBlendShapes", {})
-        if other_cfg:
-            target_key = other_cfg.get("key", "blendShapes")
-            shifting = other_cfg.get("shifting", 0)
-            is_rotation = other_cfg.get("is_rotation", False)
-            dt_mul = other_cfg.get("dt_multiplier", 20)
-            dt = dt_base * dt_mul * (120.0 / 1000.0)
-
-            for idx, raw in enumerate(g.latest_data):
-                if idx in handled_indices:
-                    continue  # already processed above
-
-                target_idx = idx - shifting
-                data_array = g.data[target_key]
-                if not (0 <= target_idx < len(data_array)):
+            # ------------------------------------------------------------------
+            # Pass 1 – process all *named* actions
+            # ------------------------------------------------------------------
+            for action, params in g.smoothing_config["Parameters"].items():
+                indices = g.indices_map.get(action, [])
+                if not indices:  # skip empty index lists (we'll handle leftovers later)
                     continue
 
-                target = data_array[target_idx]
-                delta = angle_diff(raw, target["v"]) if is_rotation else raw - target["v"]
-                sm_delta = delta * dt
-                update_target_value(target, sm_delta, is_rotation)
+                handled_indices.update(indices)
+
+                target_key = params["key"]
+                shifting = params.get("shifting", 0)
+                is_rotation = params.get("is_rotation", False)
+                dt_mul = params.get("dt_multiplier", 20)
+                dt = dt_base * dt_mul * (120.0 / 1000.0)
+
+                # Gather the observation vector for this action
+                try:
+                    obs_vec = [g.latest_data[idx] for idx in indices]
+                except IndexError:
+                    # Source array shorter than expected – just skip this action
+                    continue
+
+                # Kalman filter unless this is the catch‑all OtherBlendShapes bucket
+                if action in g.kalman_filters:
+                    kf = g.kalman_filters[action]
+                    kf.predict(dt_base)
+                    filt_vec = kf.update(obs_vec, is_rotation)
+                else:
+                    filt_vec = obs_vec  # raw values (no KF)
+
+                # Write the smoothed deltas back to the destination buffer
+                for local_i, idx in enumerate(indices):
+                    target_idx = idx - shifting
+                    data_array = g.data[target_key]
+                    if not (0 <= target_idx < len(data_array)):
+                        continue  # out‑of‑range – ignore gracefully
+
+                    target = data_array[target_idx]
+                    raw = filt_vec[local_i]
+                    delta = angle_diff(raw, target["v"]) if is_rotation else raw - target["v"]
+                    sm_delta = delta * dt
+                    update_target_value(target, sm_delta, is_rotation)
+
+            # ------------------------------------------------------------------
+            # Pass 2 – fall back to "OtherBlendShapes" for *everything else*
+            # ------------------------------------------------------------------
+            other_cfg = g.smoothing_config["Parameters"].get("OtherBlendShapes", {})
+            if other_cfg:
+                target_key = other_cfg.get("key", "blendShapes")
+                shifting = other_cfg.get("shifting", 0)
+                is_rotation = other_cfg.get("is_rotation", False)
+                dt_mul = other_cfg.get("dt_multiplier", 20)
+                dt = dt_base * dt_mul * (120.0 / 1000.0)
+
+                for idx, raw in enumerate(g.latest_data):
+                    if idx in handled_indices:
+                        continue  # already processed above
+
+                    target_idx = idx - shifting
+                    data_array = g.data[target_key]
+                    if not (0 <= target_idx < len(data_array)):
+                        continue
+
+                    target = data_array[target_idx]
+                    delta = angle_diff(raw, target["v"]) if is_rotation else raw - target["v"]
+                    sm_delta = delta * dt
+                    update_target_value(target, sm_delta, is_rotation)
 
         # ------------------------------------------------------------------
         last_time = now

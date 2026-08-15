@@ -11,6 +11,9 @@ from copy import deepcopy
 config=setup_config()
 data,default_data = setup_data()
 latest_data = [0.0] * (64 + 6 + 12 + 10 + 12 + 10 + 3 + 2 + 10)
+# 数据版本号：hand/face worker 每写完一帧 latest_data 自增，
+# 平滑循环据此跳过无新数据的轮次（120Hz 循环 → 实际只按 30fps 数据源处理，数学等价）
+latest_data_version = 0
 current_fps = 30
 stop_event = Event()
 controller=setup_controller()

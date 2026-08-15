@@ -602,6 +602,9 @@ def hand_pred_handling(detection_result):
             g.data["RightHandSplay"] = deepcopy(g.default_data["RightHandSplay"])
         g.controller.right_hand.enable = False
 
+    # 通知平滑循环：本帧数据已写入 latest_data
+    g.latest_data_version += 1
+
 def initialize_hand():
     return DirectMLHands(model_complexity=g.config["Model"]["Hand"]["model_complexity"], max_num_hands=2,
                          min_detection_confidence=g.config["Model"]["Hand"]["min_hand_detection_confidence"],
