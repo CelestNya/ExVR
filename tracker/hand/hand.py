@@ -89,12 +89,20 @@ def _vrchat_palm_anchor_image(image_hand_pose):
     return internal[0] + 0.5 * (internal[5] - internal[0])
 
 
+_last_head_anchor = None
+
+
 def _vrchat_head_anchor_image():
+    global _last_head_anchor
     if g.face_landmarks and len(g.face_landmarks[0]) > 356:
         face = g.face_landmarks[0]
         x = 0.5 * (face[127].x + face[356].x) - 0.5
         y = 0.5 - 0.5 * (face[127].y + face[356].y)
-        return np.asarray([x, y], dtype=np.float32)
+        _last_head_anchor = np.asarray([x, y], dtype=np.float32)
+        return _last_head_anchor
+    # 脸丢失/被遮挡时保持上次有效锚点，避免手位置瞬间跳变（原实现返回 (0,0) 导致手飞向屏幕中心）
+    if _last_head_anchor is not None:
+        return _last_head_anchor
     return np.zeros(2, dtype=np.float32)
 
 
@@ -110,7 +118,8 @@ def get_fitted_hand_distance(image_hand_pose):
     hand_distance = pred_distance[0]
 
     head_depth = np.round(g.data["HeadImagePosition"][2]["v"], 2)
-    distance_scalar = np.clip(head_depth, None, -1e-8)
+    # 头部深度接近 0（脸贴镜头/丢失）时除法会爆炸放大噪声，用固定缩放兜底
+    distance_scalar = head_depth if abs(head_depth) >= 0.05 else -0.05
     hand_distance = hand_distance / distance_scalar
 
     hand_distance += g.config["Tracking"]["Hand"]["z_shifting"]
@@ -468,6 +477,11 @@ def hand_pred_handling(detection_result):
                         g.latest_data[73] = wrist_rot[0]
                         g.latest_data[74] = wrist_rot[1]
                         g.latest_data[75] = wrist_rot[2]
+                    else:
+                        # 慢速移动（低于变化阈值）时小幅混合更新，避免旋转冻结卡顿
+                        g.latest_data[73] += 0.2 * (wrist_rot[0] - g.latest_data[73])
+                        g.latest_data[74] += 0.2 * (wrist_rot[1] - g.latest_data[74])
+                        g.latest_data[75] += 0.2 * (wrist_rot[2] - g.latest_data[75])
                     g.latest_data[70] = hand_position[0]
                     g.latest_data[71] = hand_position[1]
                     g.latest_data[72] = hand_position[2]
@@ -508,6 +522,11 @@ def hand_pred_handling(detection_result):
                         g.latest_data[79] = wrist_rot[0]
                         g.latest_data[80] = wrist_rot[1]
                         g.latest_data[81] = wrist_rot[2]
+                    else:
+                        # 慢速移动（低于变化阈值）时小幅混合更新，避免旋转冻结卡顿
+                        g.latest_data[79] += 0.2 * (wrist_rot[0] - g.latest_data[79])
+                        g.latest_data[80] += 0.2 * (wrist_rot[1] - g.latest_data[80])
+                        g.latest_data[81] += 0.2 * (wrist_rot[2] - g.latest_data[81])
                     g.latest_data[76] = hand_position[0]
                     g.latest_data[77] = hand_position[1]
                     g.latest_data[78] = hand_position[2]
