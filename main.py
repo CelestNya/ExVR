@@ -76,19 +76,62 @@ class VideoCaptureThread(QThread):
         self.fps = fps
 
     @staticmethod
+    def bestcam_output_size():
+        """Current BestCam virtual-camera output size, or None if unavailable.
+
+        Reads the 8-byte width/height from the companion's shared-memory
+        header (Global\\BestCam_SharedMem), so ExVR can request exactly what
+        BestCam is currently outputting — switching the tray resolution
+        becomes fully self-adapting for the input source.
+        """
+        try:
+            import ctypes
+            import struct as _struct
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenFileMappingW.restype = ctypes.c_void_p
+            k32.OpenFileMappingW.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_wchar_p]
+            k32.MapViewOfFile.restype = ctypes.c_void_p
+            k32.MapViewOfFile.argtypes = [
+                ctypes.c_void_p, ctypes.c_uint32,
+                ctypes.c_uint32, ctypes.c_uint32, ctypes.c_size_t,
+            ]
+            h = k32.OpenFileMappingW(0x0002, False, "Global\\BestCam_SharedMem")
+            if not h:
+                return None
+            p = k32.MapViewOfFile(h, 0x0002, 0, 0, 8)
+            if not p:
+                return None
+            w, hh = _struct.unpack_from("<II", ctypes.string_at(p, 8), 0)
+        except Exception:
+            return None
+        # sanity guard: a torn/corrupt header must never feed the request
+        if not (320 <= w <= 4096 and 320 <= hh <= 4096):
+            return None
+        return w, hh
+
+    @staticmethod
     def capture_request_size(width, height):
+        """Map the processing resolution to a capture size for the camera.
+
+        When BestCam is running, request exactly its current output size so
+        the input source adapts to the manually chosen tray resolution. For
+        other cameras (or BestCam unavailable), pick the smallest supported
+        BestCam size with the same aspect ratio that is >= the target; fall
+        back to the smallest same-ratio size, then to the raw request.
+        """
         if width <= 0 or height <= 0:
             return 640, 480
-        aspect_ratio = width / height
-        if abs(aspect_ratio - 16 / 9) < abs(aspect_ratio - 4 / 3):
-            if width <= 1280 and height <= 720:
-                return 1280, 720
+        bestcam = VideoCaptureThread.bestcam_output_size()
+        if bestcam:
+            return bestcam
+        supported = [(1920, 1080), (1280, 720), (800, 600), (800, 450), (640, 480)]
+        ratio = width / height
+        same_ratio = [r for r in supported if abs(r[0] / r[1] - ratio) < 0.05]
+        if not same_ratio:
             return width, height
-        if width <= 640 and height <= 480:
-            return 640, 480
-        if width <= 800 and height <= 600:
-            return 800, 600
-        return width, height
+        big_enough = [r for r in same_ratio if r[0] >= width and r[1] >= height]
+        pool = big_enough or same_ratio
+        return min(pool, key=lambda r: r[0] * r[1])
 
     def resize_for_processing(self, rgb_image):
         image_height, image_width = rgb_image.shape[:2]
