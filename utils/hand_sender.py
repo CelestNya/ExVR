@@ -13,6 +13,8 @@ def _osc_pad(b: bytes) -> bytes:
 def _encode_osc(address: str, args) -> bytes:
     """轻量 OSC 编码：与 pythonosc 的 i/f/s 编码逐字节一致，但省掉逐条构造开销。
     实测 pythonosc send_message ~20us/条，本实现 ~5us/条；send 线程每轮 20+ 条 OSC。"""
+    if not isinstance(args, (list, tuple)):
+        args = [args]  # pythonosc 兼容：标量包装为单元素列表，避免标量 TypeError
     out = bytearray(_osc_pad(address.encode("utf-8")))
     typetag = bytearray(b",")
     payload = bytearray()
