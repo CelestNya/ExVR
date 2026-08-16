@@ -192,8 +192,13 @@ class VideoCaptureThread(QThread):
                     rgb_image = draw_hand_landmarks(rgb_image)
                 h, w, ch = rgb_image.shape
                 bytes_per_line = ch * w
+                # Deep-copy the QImage: QImage(data,...) only references the
+                # numpy buffer, and the worker overwrites/releases it on the
+                # next frame. The GUI thread renders the queued signal later
+                # (delayed while it handles mouse/repaint events), so a
+                # shallow image reads freed memory -> Qt5Gui access violation.
                 convert_to_Qt_format = QImage(
-                    rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888
+                    rgb_image.data.copy(), w, h, bytes_per_line, QImage.Format_RGB888
                 )
                 self.frame_ready.emit(convert_to_Qt_format)
         self.cleanup()
